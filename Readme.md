@@ -50,7 +50,7 @@ df$Survived<- as.factor(df$Survived)
 df$Pclass<- as.factor(df$Pclass)
 ```
 
-##Data Exploration
+## Data Exploration
 
 It is easier to explore factors and numeric features separately. Here we divide the features' names to numerics and factors:
 
@@ -89,7 +89,7 @@ qplot(x=value,data=df_tidy_numerics,fill=Survived) + facet_grid(~feature,scales=
 
 It certainly looks luck there are more chances to survive in certain levels of almost each feature.
 
-##Feature engineering
+## Feature engineering
 ```{r TicketPrefix}
 df$TicketPrefix <- mapply(function(x) {strsplit(x, '\\s+')[[1]]}, as.character(df$Ticket))
 df$TicketPrefix <- mapply(function(x) {ifelse(length(x)>1, x[1], NA)}, df$TicketPrefix)
@@ -239,7 +239,7 @@ dfBackup<-df
 df <- df[,-c(1,4, 9, 11)]
 ```
 
-##split the data
+## split the data
 
 Split the data back to test and train
 ```{r}
