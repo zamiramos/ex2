@@ -1,0 +1,666 @@
+---
+title: "ex2 try1"
+author: "Amos Zamir"
+date: "April 7, 2017"
+output: html_document
+---
+
+# ex2
+
+# Position in Leaderboard - 1257
+
+![Leaderboard Image](https://github.com/zamiramos/ex2/blob/master/cforest_try1.PNG)
+
+# Kaggle Username: zamiramos 
+
+# Kaggle Profile Page: https://www.kaggle.com/zamiramos
+
+## Environment setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd('D:/Code/Serve')
+```
+
+## Read Data
+
+Read the train.csv and test.csv file into a dataframe. Use the parameter na.strings = "" to recognize empty strings as null values, otherwise these empty strings might raise errors when creating a model.
+Bind togther the train and test before the 'feature engineering'.
+
+```{r}
+df <- read.csv("Titanic/train.csv",na.strings = "")
+trainRows<-nrow(df)
+test <-read.csv('Titanic/test.csv',na.strings = "")
+test$Survived <- NA
+df<-rbind(df,test)
+```
+
+Check the datatypes of the attributes using the *str* method. You should find two numeric features that must be converted into factors. Convert these two features to factors.
+
+```{r}
+str(df)
+```
+
+'data.frame':	1309 obs. of  12 variables:
+ $ PassengerId: int  1 2 3 4 5 6 7 8 9 10 ...
+ $ Survived   : int  0 1 1 1 0 0 0 0 1 1 ...
+ $ Pclass     : int  3 1 3 1 3 3 1 3 3 2 ...
+ $ Name       : Factor w/ 1307 levels "Abbing, Mr. Anthony",..: 109 191 358 277 16 559 520 629 417 581 ...
+ $ Sex        : Factor w/ 2 levels "female","male": 2 1 1 1 2 2 2 2 1 1 ...
+ $ Age        : num  22 38 26 35 35 NA 54 2 27 14 ...
+ $ SibSp      : int  1 1 0 1 0 0 0 3 0 1 ...
+ $ Parch      : int  0 0 0 0 0 0 0 1 2 0 ...
+ $ Ticket     : Factor w/ 929 levels "110152","110413",..: 524 597 670 50 473 276 86 396 345 133 ...
+ $ Fare       : num  7.25 71.28 7.92 53.1 8.05 ...
+ $ Cabin      : Factor w/ 186 levels "A10","A14","A16",..: NA 82 NA 56 NA NA 130 NA NA NA ...
+ $ Embarked   : Factor w/ 3 levels "C","Q","S": 3 1 3 3 3 2 3 3 3 1 ...
+ 
+Fix numeric features that must be converted into factors.
+
+```{r}
+df$Survived<- as.factor(df$Survived)
+df$Pclass<- as.factor(df$Pclass)
+```
+
+##Data Exploration
+
+It is easier to explore factors and numeric features separately. Here we divide the features' names to numerics and factors:
+
+```{R}
+traindf<-head(df[-1], trainRows)
+
+cols<- 1:dim(traindf)[2]
+factors <- cols[sapply(traindf,is.factor)]
+numerics <- cols[!sapply(traindf,is.factor)]
+```
+
+We now tide the data two times: the first is for categorial data and the second for numeric data.
+```{r}
+#install.packages("tidyr")
+library(tidyr)
+df_tidy_factors<-gather(traindf[,factors],"feature","value",-1)
+df_tidy_numerics<-gather(cbind(Survived=traindf[,1],traindf[,numerics]),"feature","value",-1)
+```
+Finally, we can plot. The first plot describes only categorical features (factors). 
+Notice that the *scales* parameter was set to "free" to enable a suitable scaling for each facet (otherwise it is hard to view some of the facets, that need much smaller scales). We use the *facet_grid* that accepts a *scales* parameter.
+```{r}
+#install.packages("ggplot2")
+library(ggplot2)
+qplot(x=value,data=df_tidy_factors,fill=Survived) + facet_grid(~feature,scales="free")
+```
+![Data Exploration Factor Image](https://github.com/zamiramos/ex2/blob/master/images/1.jpg)
+
+It looks like Cabin, Name, Ticket has many levels and needs to be processed for getting more valuable features.
+
+
+One more plot for numeric features:
+```{r}
+qplot(x=value,data=df_tidy_numerics,fill=Survived) + facet_grid(~feature,scales="free")
+```
+![Data Exploration Numeric Image](https://github.com/zamiramos/ex2/blob/master/images/2.jpg)
+
+It certainly looks luck there are more chances to survive in certain levels of almost each feature.
+
+##Feature engineering
+```{r TicketPrefix}
+df$TicketPrefix <- mapply(function(x) {strsplit(x, '\\s+')[[1]]}, as.character(df$Ticket))
+df$TicketPrefix <- mapply(function(x) {ifelse(length(x)>1, x[1], NA)}, df$TicketPrefix)
+df$TicketPrefix <- mapply(function(x) {gsub('[./,]','', x)}, df$TicketPrefix)
+df$TicketPrefix <- mapply(function(x) {toupper(x)}, df$TicketPrefix)
+df$TicketPrefix <- as.factor(df$TicketPrefix)
+table(df$TicketPrefix)
+```
+
+      A      A4      A5     AQ3     AQ4      AS       C      CA CASOTON      FA      FC     FCC      LP      PC 
+      1      10      28       1       1       1       8      68       1       1       3       9       1      92 
+     PP     PPP      SC    SCA3    SCA4    SCAH    SCOW SCPARIS     SOC     SOP    SOPP SOTONO2 SOTONOQ      SP 
+      4       2       2       1       2       5       1      19       8       1       7       3      24       1 
+  STONO  STONO2  STONOQ    SWPP      WC     WEP 
+     14       7       1       2      15       4 
+
+
+Sir - gather all man respectful titles
+Lady - gather all women respectful titles
+Mlle - In english equals to Miss
+Mme - In english equals to Ms
+
+Seperate the PersonalTitles from the passenger names.
+```{r PersonalTitles}
+df$PersonalTitles <- mapply(function(x) {strsplit(x, '[,.]')[[1]][2]}, as.character(df$Name))
+df$PersonalTitles[df$PersonalTitles %in% c(' Capt',' Col', ' Don', ' Major', ' Sir')] <- ' Sir'
+df$PersonalTitles[df$PersonalTitles %in% c(' Jonkheer',' Dona', ' Lady', ' the Countess')] <- ' Lady'
+df$PersonalTitles[df$PersonalTitles %in% c(' Mlle')] <- ' Miss'
+df$PersonalTitles[df$PersonalTitles %in% c(' Mme')] <- ' Ms'
+df$PersonalTitles<-as.factor(df$PersonalTitles)
+table(df$PersonalTitles)
+```
+ Dr    Lady  Master    Miss      Mr     Mrs      Ms     Rev     Sir 
+      8       4      61     262     757     197       3       8       9 
+
+Seperate the surname from the passenger names
+```{r SurName}
+SurName <- mapply(function(x) {strsplit(x, '[,.]')[[1]][1]}, as.character(df$Name))
+```
+
+
+sibSp - number of siblings / spouses aboard the Titanic
+parch - number of parents / children aboard the Titanic
+FamilySize = sibSp + parch + 1
+```{r FamilySize}
+df$FamilySize <- mapply(function(sibSp, parch) { sibSp + parch + 1}, df$SibSp, df$Parch)
+table(df$FamilySize)
+```
+  1   2   3   4   5   6   7   8  11 
+790 235 159  43  22  25  16   8  11 
+
+Combine FamilySize and SurName to new feature
+```{r FamilySizeSurName}
+df$FamilySizeSurName <- mapply(function(familyS, surN) { paste(as.character(familyS), as.character(surN), sep='')}, df$FamilySize, SurName)
+FamilySizeSurNameCount<-as.data.frame(table(df$FamilySizeSurName))
+
+df$FamilySizeSurName <- mapply(function(familySS) { 
+  (FamilySizeSurNameCount[which(FamilySizeSurNameCount$Var1 == familySS),]$Freq -mean(FamilySizeSurNameCount$Freq)) /sqrt(var(FamilySizeSurNameCount$Freq))
+  }, df$FamilySizeSurName)
+# it seems that big families most likely not survived
+#plot(df$FamilySizeSurName, df$Survived)
+```
+
+The cabin room number can be meaningful.
+```{r CabinMinRoomNumber}
+df$CabinMinRoomNumber<-mapply(function(x)(gsub('[a-zA-Z]', '', x)), df$Cabin)
+df$CabinMinRoomNumber <- mapply(function(x) {strsplit(x, '\\s+' )[[1]][1]}, as.character(df$CabinMinRoomNumber))
+df$CabinMinRoomNumber <- as.integer(df$CabinMinRoomNumber)
+table(df$CabinMinRoomNumber)
+```
+  2   3   4   5   6   7   8   9  10  11  12  14  15  16  17  18  19  20  21  22  23  24  25  26  28  29  30  31 
+  6   1   5   3   9   4   2   2   5   3   1   1   2   1   3   3   4   5   3   7   7   4   2   4   5   1   4   5 
+ 32  33  34  35  36  37  38  39  40  41  42  43  44  45  46  47  48  49  50  51  52  53  54  55  56  57  58  60 
+  3   8   7   4   5   3   4   3   2   2   1   1   2   5   5   2   1   5   5   4   4   1   2   2   1   5   4   1 
+ 61  62  63  65  67  68  69  70  71  73  77  78  79  80  82  83  85  86  87  89  90  91  92  93  94  95  96  97 
+  1   2   1   2   2   3   2   1   2   1   3   6   1   3   2   2   2   3   1   2   1   1   2   2   1   1   4   1 
+ 99 101 102 103 104 105 106 110 111 116 118 121 123 124 125 126 128 130 132 148 
+  1   7   1   1   1   1   2   1   1   2   1   2   2   2   2   2   1   1   1   1 
+  
+The cabin level can be meaningful.
+```{r CabinLevel}
+df$CabinLevel<-mapply(function(x)(gsub('[^a-zA-Z]', '', x)), df$Cabin)
+df$CabinLevel <- mapply(function(x) {substr(x,1,1)}, as.character(df$CabinLevel))
+df$CabinLevel <- as.factor(df$CabinLevel)
+table(df$CabinLevel)
+```
+ A  B  C  D  E  F  G  T 
+22 65 94 46 41 21  5  1 
+
+### Complete NA's values
+Lets run summary to check how much NA's we have
+```{r}
+summary(df)
+```
+ PassengerId   Survived   Pclass                                Name          Sex           Age       
+ Min.   :   1   0   :549   1:323   Connolly, Miss. Kate            :   2   female:466   Min.   : 0.17  
+ 1st Qu.: 328   1   :342   2:277   Kelly, Mr. James                :   2   male  :843   1st Qu.:21.00  
+ Median : 655   NA's:418   3:709   Abbing, Mr. Anthony             :   1                Median :28.00  
+ Mean   : 655                      Abbott, Mr. Rossmore Edward     :   1                Mean   :29.88  
+ 3rd Qu.: 982                      Abbott, Mrs. Stanton (Rosa Hunt):   1                3rd Qu.:39.00  
+ Max.   :1309                      Abelson, Mr. Samuel             :   1                Max.   :80.00  
+                                   (Other)                         :1301                NA's   :263    
+     SibSp            Parch            Ticket          Fare                     Cabin      Embarked  
+ Min.   :0.0000   Min.   :0.000   CA. 2343:  11   Min.   :  0.000   C23 C25 C27    :   6   C   :270  
+ 1st Qu.:0.0000   1st Qu.:0.000   1601    :   8   1st Qu.:  7.896   B57 B59 B63 B66:   5   Q   :123  
+ Median :0.0000   Median :0.000   CA 2144 :   8   Median : 14.454   G6             :   5   S   :914  
+ Mean   :0.4989   Mean   :0.385   3101295 :   7   Mean   : 33.295   B96 B98        :   4   NA's:  2  
+ 3rd Qu.:1.0000   3rd Qu.:0.000   347077  :   7   3rd Qu.: 31.275   C22 C26        :   4             
+ Max.   :8.0000   Max.   :9.000   347082  :   7   Max.   :512.329   (Other)        : 271             
+                                  (Other) :1261   NA's   :1         NA's           :1014             
+  TicketPrefix PersonalTitles   FamilySize     FamilySizeSurName CabinMinRoomNumber   CabinLevel  
+ PC     : 92    Mr    :757    Min.   : 1.000   Min.   :-0.4486   Min.   :  2.00     C      :  94  
+ CA     : 68    Miss  :262    1st Qu.: 1.000   1st Qu.:-0.4486   1st Qu.: 23.00     B      :  65  
+ A5     : 28    Mrs   :197    Median : 1.000   Median :-0.4486   Median : 40.50     D      :  46  
+ SOTONOQ: 24    Master: 61    Mean   : 1.884   Mean   : 0.6482   Mean   : 49.27     E      :  41  
+ SCPARIS: 19    Sir   :  9    3rd Qu.: 2.000   3rd Qu.: 0.6440   3rd Qu.: 76.00     A      :  22  
+ (Other):117    Dr    :  8    Max.   :11.000   Max.   :10.4771   Max.   :148.00     (Other):  27  
+ NA's   :961   (Other): 15                                       NA's   :1027       NA's   :1014 
+
+we can see that 'Age' have 263 missing values and 'Fare' have one and etc..
+Lets complete these values using rpart algorithm:
+
+1.Predict Age Column using 'anova' method because it continues value
+```{r}
+library('rpart')
+Agefit <- rpart(Age ~ Pclass + Sex + SibSp + Parch + Fare + Embarked + PersonalTitles + FamilySize,
+                  data=df[!is.na(df$Age),], 
+                  method="anova")
+df$Age[is.na(df$Age)] <- predict(Agefit, df[is.na(df$Age),])
+```
+
+2.Predict Ticket coulumn
+```{r}
+TicketPrefixfit <- rpart(TicketPrefix ~ Pclass + Age + Sex + SibSp + Parch + Fare + Embarked + PersonalTitles + FamilySize,
+                  data=df[!is.na(df$TicketPrefix),], 
+                  method="class")
+df$TicketPrefix[is.na(df$TicketPrefix)] <- predict(TicketPrefixfit, df[is.na(df$TicketPrefix),],type = "class")
+```
+
+3.Predict Fare coulmn
+```{r}
+Farefit <- rpart(Fare ~ Pclass + Sex + SibSp + Parch + Age + Embarked + PersonalTitles + FamilySize,
+                  data=df[!is.na(df$Fare),], 
+                  method="anova")
+df$Fare[is.na(df$Fare)] <- predict(Farefit, df[is.na(df$Fare),])
+```
+
+4.Predict Embarked coulomn
+```{r}
+Embarkedfit <- rpart(Embarked ~ Pclass + Age + Sex + SibSp + Parch + Fare + PersonalTitles + FamilySize,
+                  data=df[!is.na(df$Embarked),], 
+                  method="class")
+df$Embarked[is.na(df$Embarked)] <- predict(Embarkedfit, df[is.na(df$Embarked),],type = "class")
+```
+
+5.Predict CabinMinRoomNumber column
+```{r}
+CabinMinRoomNumberfit <- rpart(CabinMinRoomNumber ~ Pclass + Sex + SibSp + Parch + + Fare+ Age + Embarked + PersonalTitles + FamilySize,
+                  data=df[!is.na(df$CabinMinRoomNumber),], 
+                  method="anova")
+df$CabinMinRoomNumber[is.na(df$CabinMinRoomNumber)] <- predict(CabinMinRoomNumberfit, df[is.na(df$CabinMinRoomNumber),])
+```
+
+
+6.Predict Cabin Level column
+```{r}
+CabinLevelfit <- rpart(CabinLevel ~ Pclass + Sex + Fare + Age + PersonalTitles,
+                  data=df[!is.na(df$CabinLevel),], 
+                  method="class")
+df$CabinLevel[is.na(df$CabinLevel)] <- predict(CabinLevelfit, df[is.na(df$CabinLevel),],type = "class")
+```
+
+### Normalize fare data
+```{r}
+df$Fare<-mapply(function(fare){(fare - mean(df$Fare))/sqrt(var(df$Fare))}, df$Fare)
+```
+
+## Removes unnecessary columns
+
+```{r}
+dfBackup<-df
+df <- df[,-c(1,4, 9, 11)]
+```
+
+##split the data
+
+Split the data back to test and train
+```{r}
+traindf<-head(df, trainRows)
+testdf<-tail(df, -trainRows)[-1]
+```
+
+# Submissions 
+
+## try1 - using cforest
+
+### Feature Engineriing
+In the section of feature engineering above.
+
+### Algorithm Description
+
+cforest - An implementation of the random forest and bagging ensemble algorithms utilizing conditional inference trees as base learners.
+
+Function cforest_unbiased returns the settings suggested for the construction of unbiased random
+forests (teststat = "quad", testtype = "Univ", replace = FALSE) by Strobl et al.
+(2007) and is the default since version 0.9-90
+
+### Algorithm Calibration
+
+#### ctree Statistics
+```{r}
+library(party)
+library(caret)
+set.seed(123)
+
+#Fare + PersonalTitles
+#TicketPrefix + FamilySize + PersonalTitles + FamilySizeSurName + CabinMinRoomNumber
+cforestfit1<-cforest(Survived~ Pclass + Sex + Age + Embarked + TicketPrefix + FamilySize + PersonalTitles +                        FamilySizeSurName + CabinMinRoomNumber,
+                   data = traindf,
+                   controls=cforest_unbiased(ntree=400, mtry=3))
+
+cforestfit2<-cforest(Survived~ Pclass + Sex + Age + Embarked + TicketPrefix + FamilySize + PersonalTitles +                        FamilySizeSurName + CabinMinRoomNumber,
+                   data = traindf,
+                   controls=cforest_unbiased(ntree=800, mtry=3))
+
+cforestfit3<-cforest(Survived~ Pclass + Sex + Age + Embarked + TicketPrefix + FamilySize + PersonalTitles +                        FamilySizeSurName + CabinMinRoomNumber,
+                   data = traindf,
+                   controls=cforest_unbiased(ntree=1200, mtry=3))
+
+cforestfit4<-cforest(Survived~ Pclass + Sex + Age + Embarked + TicketPrefix + FamilySize + PersonalTitles +                        FamilySizeSurName + CabinMinRoomNumber,
+                   data = traindf,
+                   controls=cforest_unbiased(ntree=2000, mtry=3))
+
+cforestfit5<-cforest(Survived~ Pclass + Sex + Age + Embarked + TicketPrefix + FamilySize + PersonalTitles +                        FamilySizeSurName + CabinMinRoomNumber,
+                   data = traindf,
+                   controls=cforest_unbiased(ntree=3000, mtry=3))
+
+cforestfit <- c(cforestfit1, cforestfit2, cforestfit3, cforestfit4, cforestfit5)
+
+cforestStatsArray<-sapply(cforestfit, function(x){ cforestStats(x) })
+
+cforestStatsArray
+```
+
+              [,1]      [,2]      [,3]      [,4]      [,5]
+Accuracy 0.8338945 0.8361392 0.8350168 0.8372615 0.8350168
+Kappa    0.6380614 0.6437620 0.6407110 0.6464024 0.6415252
+
+It seems that ntree=2000 is the best.
+
+```{r}
+cforestfit <- cforestfit4
+```
+
+#### Feature Importance
+```{r}
+cforest_importance <- varimp(cforestfit)
+dotchart(cforest_importance[order(cforest_importance)])
+```
+![Feature Importance Image](https://github.com/zamiramos/ex2/blob/master/images/3.jpg)
+
+#### predection
+```{r}
+Prediction <- predict(cforestfit, testdf, OOB=TRUE, type = "response")
+```
+
+write to file
+```{r}
+res1<-as.numeric(Prediction)
+res1[res1==1]<-0
+res1[res1==2]<-1
+res <- cbind(PassengerId=test$PassengerId,Survived=res1)
+write.csv(res,file="Titanic/try1.csv",row.names = F)
+```
+
+
+### Shortcut to submitted file
+
+[link to submitted file!](https://github.com/zamiramos/ex2/blob/master/cforest_try1.csv)
+
+### Screenshot of Kaggle Score
+
+![Leaderboard Image](https://github.com/zamiramos/ex2/blob/master/cforest_try1.PNG)
+
+
+## try2 - using rpart
+
+### Feature Engineriing
+In the section of feature engineering above.
+
+### Algorithm Description
+The rpart package found in the R tool can be used for classification by decision trees and can also be used to generate regression trees. Recursive partitioning is a fundamental tool in data mining. It helps us explore the structure of a set of data, while developing easy to visualize decision rules for predicting a categorical (classification tree) or continuous (regression tree) outcome. The rpart programs build classification or regression models of a very general structure using a two stage procedure; the resulting models can be represented as binary trees. The tree is built by the following process: first the single variable is found which best splits the data into two groups ('best' will be defined later). The data is separated, and then this process is applied separately to each sub-group, and so on recursively until the subgroups either reach a minimum size (5 for this data) or until no improvement can be made. The resultant model is, with certainty, too complex, and the question arises as it does with all stepwise procedures of when to stop. The second stage of the procedure consists of using cross-validation to trim back the full tree.
+
+### Algorithm Calibration
+
+#### rpart Statistics
+```{r}
+library(rpart)
+set.seed(123)
+
+trcontrol <- trainControl(method="cv", number=10, repeats=3)
+
+rpartfit <- train(
+        Survived~., data=traindf, method="rpart", trControl=trcontrol, 
+          tuneGrid = expand.grid(
+            cp = c(0.01,0.005,0.0005)
+          ))
+
+
+plot(rpartfit)
+```
+![rpart accuracy Image](https://github.com/zamiramos/ex2/blob/master/images/images/4.jpg)
+
+it seems like 0.005 give the best acuuracy.
+
+#### Feature Importance
+```{r}
+varImp(rpartfit)
+```
+  rpart variable importance
+
+  only 20 most important variables shown (out of 64)
+
+                      Overall
+PersonalTitles Mr     100.000
+Sexmale                98.746
+Pclass3                65.583
+PersonalTitles Mrs     38.110
+PersonalTitles Miss    36.719
+FamilySize             24.426
+TicketPrefixPC         23.520
+FamilySizeSurName      21.777
+Fare                   21.368
+SibSp                  18.408
+Age                    16.116
+CabinMinRoomNumber     13.348
+CabinLevelE            11.692
+CabinLevelF             8.608
+TicketPrefixCA          5.393
+TicketPrefixA5          5.259
+CabinLevelC             3.619
+Pclass2                 2.234
+Parch                   2.054
+PersonalTitles Master   1.952
+
+#### predection
+```{r}
+Prediction <- predict(rpartfit, testdf)
+```
+
+write to file
+```{r}
+res1<-as.numeric(Prediction)
+res1[res1==1]<-0
+res1[res1==2]<-1
+res <- cbind(PassengerId=test$PassengerId,Survived=res1)
+write.csv(res,file="Titanic/try2.csv",row.names = F)
+```
+
+
+### Shortcut to submitted file
+
+[link to submitted file!](https://github.com/zamiramos/ex2/blob/master/rpart_try2.csv)
+
+### Screenshot of Kaggle Score
+
+![Leaderboard Image](https://github.com/zamiramos/ex2/blob/master/rpart_try2.PNG)
+
+
+
+## try3 - using gbm - Stochastic Gradient Boosting
+
+### Feature Engineriing
+In the section of feature engineering above.
+
+### Algorithm Description
+Gradient boosting is a machine learning technique for regression and classification problems, which produces a prediction model in the form of an ensemble of weak prediction models, typically decision trees. It builds the model in a stage-wise fashion like other boosting methods do, and it generalizes them by allowing optimization of an arbitrary differentiable loss function.
+
+### Algorithm Calibration
+
+#### gbm Statistics
+```{r}
+library(stats)
+set.seed(123)
+
+trcontrol <- trainControl(method="cv", number=10, repeats=3)
+
+gbmfit <- train(
+        Survived~., data=traindf, method="gbm", trControl=trcontrol, 
+          tuneGrid = expand.grid(
+            n.trees = c(1000,2000), 
+            interaction.depth = c(5,10,20),
+            shrinkage = c(0.001, 0.01, 0.1),
+            n.minobsinnode = c(10, 20, 30)
+          ),
+        verbose = FALSE)
+
+
+plot(gbmfit)
+```
+![Plot gbmfit Image](https://github.com/zamiramos/ex2/blob/master/images/5.jpg)
+
+We can see that the best tuning is shrinkage = 0.01 and interaction.depth is 10. n.minobsinnode = 30
+
+lets test more ntree options:
+
+```{r}
+library(stats)
+set.seed(123)
+
+trcontrol <- trainControl(method="cv", number=10, repeats=3)
+
+gbmfit <- train(
+        Survived~Sex + Age + Embarked + TicketPrefix + FamilySize + PersonalTitles + FamilySizeSurName + CabinMinRoomNumber, data=traindf, method="gbm", trControl=trcontrol, 
+          tuneGrid = expand.grid(
+            n.trees = c(300, 500, 1000, 1500,2000), 
+            interaction.depth = 10,
+            shrinkage = 0.01,
+            n.minobsinnode = 30
+          ),
+        verbose = FALSE)
+
+
+plot(gbmfit)
+```
+![Plot gbmfit Image](https://github.com/zamiramos/ex2/blob/master/images/6.jpg)
+
+great ntree = 500 is the best score.
+
+
+### Predict
+```{r}
+new_pred<- predict(gbmfit,newdata = testdf)
+new_pred<-sapply(new_pred, function(x){ as.character(x) == "1" })
+res <- cbind(PassengerId=test$PassengerId,Survived=new_pred)
+write.csv(res,file="Titanic/try3.csv",row.names = F)
+```
+
+### Shortcut to submitted file
+
+[link to submitted file!](https://github.com/zamiramos/ex2/blob/master/gbm_try3.csv)
+
+### Screenshot of Kaggle Score
+
+![Leaderboard Image](https://github.com/zamiramos/ex2/blob/master/gbm_try3.PNG)
+
+
+## try4 - Using Caret Stacking
+
+### Feature Engineriing
+In the section of feature engineering above.
+
+### Algorithm Description
+We will use in ensemble of the 3 models (above- try1,try2,try3):
+1. cforest - An implementation of the random forest and bagging ensemble algorithms utilizing conditional inference trees as base learners.
+2. rpart - Decision trees.
+3. gbm - Stochastic Gradient Boosting.
+
+and RandomForest as the stacking algorithm.
+
+### Algorithm Calibration
+We already calibrated the parameters of each algorithm separately.
+
+Let's look that there is no high colleration between them:
+
+```{r}
+library(caret)
+library(caretEnsemble)
+library(party)
+set.seed(123)
+control <- trainControl(method="cv", number=10, savePredictions='final', classProbs=TRUE)
+models <- caretList(
+  make.names(Survived)~., 
+  data=traindf,
+  metric='Accuracy', 
+  trControl=control,
+  tuneList = list(
+    cforest = caretModelSpec(
+      method = "cforest",
+      controls = cforest_unbiased(ntree=2000, mtry=3)
+    ),
+    gbm = caretModelSpec(
+      method = "gbm",
+      tuneGrid = expand.grid(
+        n.trees = 1000, 
+        interaction.depth = 10,
+        shrinkage = 0.01,
+        n.minobsinnode = 30
+        ),
+      verbose = FALSE
+    ),
+    rpart = caretModelSpec(
+      method = "rpart",
+      tuneGrid = expand.grid(
+          cp = 0.005
+        )
+    )
+  )
+  )
+results <- resamples(models)
+summary(results)
+modelCor(results)
+```
+Call:
+summary.resamples(object = results)
+
+Models: cforest, gbm, rpart 
+Number of resamples: 10 
+
+Accuracy 
+          Min. 1st Qu. Median   Mean 3rd Qu.   Max. NA's
+cforest 0.8090  0.8207 0.8371 0.8384  0.8547 0.8764    0
+gbm     0.7865  0.8230 0.8436 0.8406  0.8516 0.8989    0
+rpart   0.7416  0.7865 0.8090 0.8070  0.8281 0.8667    0
+
+Kappa 
+          Min. 1st Qu. Median   Mean 3rd Qu.   Max. NA's
+cforest 0.5932  0.6157 0.6441 0.6529  0.6868 0.7426    0
+gbm     0.5401  0.6227 0.6587 0.6568  0.6692 0.7846    0
+rpart   0.4496  0.5321 0.5880 0.5818  0.6244 0.7176    0
+
+          cforest       gbm     rpart
+cforest 1.0000000 0.6373432 0.7236361
+gbm     0.6373432 1.0000000 0.5736586
+rpart   0.7236361 0.5736586 1.0000000
+
+
+
+We can see that there is no high correlation (<75) between them and we can continue to build one model from all the models:
+
+```{r}
+set.seed(123)
+stackControl <- trainControl(method="cv", number=10, savePredictions='final', classProbs=TRUE)
+stack.rf <- caretStack(models, method="rf", metric="Accuracy", trControl=stackControl, tuneGrid = 
+                         expand.grid(mtry = c(2, 3, 6, 9)))
+print(stack.rf)
+```
+
+### Predict Test File and Write results
+
+```{r}
+new_pred<- predict(stack.rf,newdata = testdf)
+length(new_pred)
+new_pred<-sapply(new_pred, function(x){ as.character(x) == "X1" })
+```
+[1] 418
+
+Write the *PassengerId* and *Survived* attributes to a csv file and submit this file to kaggle's competition 
+
+```{r}
+res <- cbind(PassengerId=test$PassengerId,Survived=new_pred)
+write.csv(res,file="Titanic/try4.csv",row.names = F)
+```
+
+
+### Shortcut to submitted file
+
+[link to submitted file!](https://github.com/zamiramos/ex2/blob/master/rf_ensemble_try4.csv)
+
+### Screenshot of Kaggle Score
+
+![Leaderboard Image](https://github.com/zamiramos/ex2/blob/master/rf_ensemble_try4.PNG)
